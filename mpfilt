@@ -18,8 +18,8 @@ use warnings;
 use Getopt::Long;
 use File::Temp;
 use Term::ANSIColor qw(:constants);
-use FindBin;
-use lib "$FindBin::Bin/lib";
+#use FindBin;
+#use lib "$FindBin::Bin/lib";
 
 my $version = "0.1.0";
 my $min_match = 20; # aa
@@ -72,14 +72,11 @@ $min_identity = $opts{identity} if exists $opts{identity};
 ###############################################
 # check requirments
 ###############################################
-&cmd_check("sed");
-&cmd_check("awk");
-
-&runreport("Requirement checked");
-
+#&cmd_check("awk");
+#&runreport("Requirement checked");
 # script path:
-my $scriptPath = $FindBin::Bin;
-my $utilsPath = $scriptPath."/utils/";
+#my $scriptPath = $FindBin::Bin;
+#my $utilsPath = $scriptPath."/utils/";
 
 ###############################################
 # Extract mRNA entries in the GFF file
@@ -286,8 +283,7 @@ sub cmd_check {
 	}
 }
 
-############################
-####################
+###############################################
 # module 2: report running result
 ###############################################
 # funtion to report running return
