@@ -25,7 +25,7 @@ my $version = "0.1.0";
 my $min_match = 20; # aa
 my $min_identity = 80; # percentage
 
-our OVERLAP_RATIO_CUTOFF = 0.5;
+use constant OVERLAP_RATIO_CUTOFF => 0.5; # Default proportion to total CDS lengths to define "overlap"
 
 sub prompt {
     print <<EOF;
