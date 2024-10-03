@@ -24,6 +24,7 @@ use Term::ANSIColor qw(:constants);
 my $version = "0.1.0";
 my $min_match = 20; # aa
 my $min_identity = 80; # percentage
+my $format = "gff"; # default output format
 
 use constant OVERLAP_RATIO_CUTOFF => 0.5; # Default proportion to total CDS lengths to define "overlap"
 
@@ -34,6 +35,7 @@ sub prompt {
     --gff <file>     GFF output file from miniprot; required
     --match <int>    minimum match in amino acid ($min_match)
     --identity <int> minimum identity in percentage ($min_identity)
+    --format <str>   output format: gff or bed ($format)
     --version        version information
     --help:          help information
 EOF
@@ -47,7 +49,7 @@ my %opts = ();
 my ($query, $db);
 
 &GetOptions(\%opts, "gff=s", "match=i", "identity=i",
-                    "version", "help");
+                    "format=s", "version", "help");
 
 if (exists $opts{version}) {
 	print "$version\n";
@@ -68,6 +70,14 @@ if (!exists $opts{gff}) {
 }
 $min_match = $opts{match} if exists $opts{match};
 $min_identity = $opts{identity} if exists $opts{identity};
+
+if (exists $opts{format}) {
+	$format = $opts{format};
+	if ($format ne "gff" and $format ne "bed") {
+		print STDERR RED, "--format must be either gff or bed\n", RESET;
+		exit;
+	}
+}
 
 ###############################################
 # check requirments
@@ -252,20 +262,33 @@ for (my $i=1; $i<=$group; $i++) {
 }
 
 ###############################################
-# output a new GFF 
+# output a new GFF or BED
 ###############################################
 open(GFF, $gff) || die;
 while (<GFF>) {
 	chomp;
 	if (!/^#/) {
-		if (/\b(ID|Parent)=(.*);Rank/) {
+		if (/\b(ID|Parent)=(.*);Rank.*Identity=(\d+\.\d+);.*Target=(\S+)\s/) {
 			my $mRNA_id = $2;
+			my $aa_identity = $3;
+			my $target_id = $4;
 			if (exists $passed_mRNA{$mRNA_id}) {
-				print "$_\n";
+				if ($format eq "gff") {
+					print "$_\n";
+				} else { # BED, only output mRNA entries
+					my @line = split(/\t/, $_);
+					if ($line[2] eq "mRNA") {
+						print "$line[0]\t";
+						my $mRNA_start0 = $line[3] - 1;
+						print "$mRNA_start0\t$line[4]\t$mRNA_id\t$aa_identity\t$line[6]\t$target_id\n";
+					}
+				}
 			}
 		}
 	} else {
-		print "$_\n";
+		if ($format eq "gff") {
+			print "$_\n";
+		}
 	}
 }
 close GFF;
