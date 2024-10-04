@@ -6,7 +6,10 @@ To map proteins to genomic DNA sequences using miniprot
 
 ### Usage
 Here is an example to run protmap
+
 ```
+git clone https://github.com/liu3zhenlab/protmap.git
+cd test
 ../protmap --prot ../data/prot.fas --dna ../data/dna.fas
 ```
 
