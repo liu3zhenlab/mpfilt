@@ -1,8 +1,7 @@
 #!/bin/bash
 fasta=$1
-effector=/homes/liu3zhen/scripts2/miniprot/protmap/data/Mo.effectors.db03.fasta
+effector=/bulk/liu3zhen/research/projects/mini2020/data/effectors/known.effectors.db03.fasta
 out=`basename $fasta | sed 's/.fasta//'`
-
 ~/software/miniprot/protmap \
 	--prot $effector \
 	--dna $fasta \
