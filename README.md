@@ -8,9 +8,8 @@ To filter GFF outputs from miniprot
 
 ## OUTPUT
 ### BED format
-Attempt | #1
------------ | -----------
 colunm | description
+----------- | -----------
 chr | chromosome or sequence ID in genomic DNA
 start | 0-based start position
 end | 1-based end position
