@@ -1,12 +1,12 @@
 # mpfilt
 To filter GFF outputs from miniprot
 
-### example run
+### Example run
 ```
 ./protmap 
 ```
 
-## OUTPUT
+## Output
 ### BED format
 colunm | description
 ----------- | -----------
@@ -17,6 +17,6 @@ mRNA | mRNA hit ID
 rank | mRNA hit rank
 strand | mRNA orientation
 protein | query protein ID
-alnmatch | proportion of matched amino acids to the alignment amino acid length
-protmatch | proportion of matched amino acids to the protein length
+alnmatch | ratio of the matched amino acid length to the alignment amino acid length
+protmatch | ratio of the matched amino acid length to the protein length
 
