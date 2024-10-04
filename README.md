@@ -2,7 +2,7 @@
 To map proteins to genomic DNA sequences using miniprot
 
 ### Dependency
-[miniprot](https://github.com/lh3/miniprot.git) needs to be installed and in the environment path.
+[miniprot](https://github.com/lh3/miniprot.git) must be installed and accessible in the system’s environment PATH.
 
 ### Usage
 Here is an example to run protmap
