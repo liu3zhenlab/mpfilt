@@ -18,7 +18,7 @@ cd test
 The GFF output is the filtered result from the miniprot GFF (--gff-only) output. The format remains the same.
 
 ### BED output
-colunm | description
+field | description
 ----------- | -----------
 chr | chromosome or sequence ID in genomic DNA
 start | 0-based start position
