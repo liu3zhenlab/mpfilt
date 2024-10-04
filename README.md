@@ -1,13 +1,20 @@
-# mpfilt
-To filter GFF outputs from miniprot
+# protmap
+To map proteins to genomic DNA sequences using miniprot
 
-### Example run
+### Dependency
+[miniprot](https://github.com/lh3/miniprot.git) needs to be installed and in the environment path.
+
+### Usage
+Here is an example to run protmap
 ```
-./protmap 
+../protmap --prot ../data/prot.fas --dna ../data/dna.fas
 ```
 
 ## Output
-### BED format
+### GFF output
+The GFF output is the filtered result from the miniprot GFF (--gff-only) output. The format remains the same.
+
+### BED output
 colunm | description
 ----------- | -----------
 chr | chromosome or sequence ID in genomic DNA
@@ -19,4 +26,7 @@ strand | mRNA orientation
 protein | query protein ID
 alnmatch | ratio of the matched amino acid length to the alignment amino acid length
 protmatch | ratio of the matched amino acid length to the protein length
+
+## Contacts
+Please report isssues or email [Sanzhen Liu](liu3zhen@ksu.edu) for questions.
 
