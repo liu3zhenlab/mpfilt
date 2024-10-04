@@ -1,0 +1,530 @@
+#!/usr/bin/perl -w
+#======================================================================
+# protmap
+# Author: Sanzhen Liu <liu3zhen@ksu.edu>
+# 10/1/2024
+# Perl script to map proteins to genomic DNA
+#
+# ALGORITHM #
+# - step 1: miniprot to map proteins to generate a GFF file
+# - step 2: filter
+# 1. Extract mRNA entries in the GFF input
+# 2. Group mRNA hits if regions of mRNAs overlap
+# 3. For mRNAs in each group, perform pairwise comparisons to see if CDS overlaps significantly.
+#    Two mRNA overlaps if the overlapping regions consist of a high ratio (>=50%) of the total CDS length to either mRNA
+# 4. Subgroups are formed in a group if non-overlapping mRNAs exist
+# 5. For each subgroup, only pass one mRNA with the longest "match"
+#    "match" is determined by multiplying the identity with the alignment length
+#======================================================================
+use strict;
+use warnings;
+use Getopt::Long;
+use File::Temp;
+use Term::ANSIColor qw(:constants);
+#use FindBin;
+#use lib "$FindBin::Bin/lib";
+
+my $version = "0.1.0";
+my $prefix = "protmap";
+my $mp_para = "--gff-only";
+my $min_match = 20; # aa
+my $min_identity = 80; # percentage
+my $format = "both"; # default output format
+
+use constant OVERLAP_RATIO_CUTOFF => 0.5; # Default proportion to total CDS lengths to define "overlap"
+
+sub prompt {
+    print <<EOF;
+    Usage: perl $0 --prot <protein fasta> --dna <DNA fasta> [options]
+    [Options]
+    --prot <file>    protein fasta sequences in the FASTA format; required
+    --dna <file>     genomic DNA sequences in the FASTA format; required
+    --mppara <str>   miniprot mapping parameters ($mp_para);
+	--prefix <str>   prefix for output ($prefix)
+    --match <int>    minimum match in amino acid ($min_match)
+    --identity <int> minimum identity in percentage ($min_identity)
+    --format <str>   output format: gff, bed, or both ($format)
+    --version        version information
+    --help:          help information
+EOF
+exit;
+}
+
+###############################################
+# parameters:
+###############################################
+my %opts = ();
+my ($query, $db);
+
+&GetOptions(\%opts, "prot=s", "dna=s", "prefix=s", 
+					"mppara=s", "match=i", "identity=i",
+					"format=s", "version", "help");
+
+if (exists $opts{version}) {
+	print "$version\n";
+	exit;
+}
+
+&prompt if exists $opts{help} or !%opts;
+
+my $prot;
+my $dna;
+
+if (!exists $opts{prot} or !exists $opts{dna}) {
+	print STDERR RED, "--prot and --dna are required\n", RESET;
+	&prompt;
+} else {
+	$prot = $opts{prot};
+	if ( ! -f $prot) {
+		print STDERR RED, "$prot does not exist\n", RESET;
+	}
+	
+	$dna = $opts{dna};
+	if ( ! -f $dna) {
+		print STDERR RED, "$dna does not exist\n", RESET;
+	}
+}
+
+$prefix = $opts{prefix} if exists $opts{prefix};
+$min_match = $opts{match} if exists $opts{match};
+$min_identity = $opts{identity} if exists $opts{identity};
+
+# miniprot alignment parameters:
+$mp_para = $opts{mppara} if exists $opts{mppara};
+if ($mp_para !~ "--gff-only") {
+	$mp_para .= " --gff-only";
+}
+
+if (exists $opts{format}) {
+	$format = $opts{format};
+	if ($format ne "gff" and $format ne "bed" and $format ne "both") {
+		print STDERR RED, "--format must be gff, bed, or both\n", RESET;
+		exit;
+	}
+}
+
+###############################################
+# check requirments
+###############################################
+&cmd_check("miniprot");
+
+&runreport("Requirement checked");
+
+# script path:
+#my $scriptPath = $FindBin::Bin;
+#my $utilsPath = $scriptPath."/utils/";
+
+###############################################
+# lengths of input proteins 
+###############################################
+my %prot_size;
+my ($prot_name, $size);
+open(IN, $prot) || die;
+while (<IN>) {
+	$_ =~ s/\R//g;
+   chomp;
+   if (/^>(\S+)/) {
+      if (defined $prot_name) {
+         $prot_size{$prot_name} = $size;
+      }
+      $prot_name = $1;
+      $size = 0;
+   }
+   else {
+      $_ =~ s/\s//g;
+	  $size += length($_);
+   }
+}
+# last element:
+$prot_size{$prot_name} = $size;
+close IN;
+
+&runreport("step 01: Determined lengths of proteins"); 
+
+###############################################
+# miniprot run
+###############################################
+my $tmpgff = $prefix.".0.tmp.gff";
+my $mp_script="miniprot \\
+  $mp_para \\
+  $dna \\
+  $prot \\
+   \\
+  \>$tmpgff";
+
+&runreport("step 02a: start to run minimap");
+print STDERR "  $mp_script\n";
+# run minimap
+my $run_error=system($mp_script);
+
+if (!$run_error) {
+	&runreport("step 02b: minimap done");
+} else {
+	&runreport("step 02b: quit due to minimap running issue");
+	exit;
+}
+
+###############################################
+# Extract mRNA entries in the GFF file
+###############################################
+##gff-version 3
+#chr2	miniprot	mRNA	73695109(3)	7381862(4)	20700(5)	-(6)	.(7)	ID=MP000001;Rank=1;Identity=0.9983;Positive=0.9988;Target=ACE1_Q6ZX14 1 4034
+#chr2	miniprot	CDS	7381010	7381862	1498	-	0	Parent=MP000001;Rank=1;Identity=1.0000;Target=ACE1_Q6ZX14 1 284
+#chr2	miniprot	CDS	7375180	7380922	9904	-	2	Parent=MP000001;Rank=1;Identity=0.9984;Target=ACE1_Q6ZX14 285 2198
+#chr2	miniprot	CDS	7374382	7375088	1189	-	1	Parent=MP000001;Rank=1;Identity=1.0000;Target=ACE1_Q6ZX14 2199 2434
+#chr2	miniprot	CDS	7369510	7374311	8109	-	2	Parent=MP000001;Rank=1;Identity=0.9975;Target=ACE1_Q6ZX14 2435 4034
+#chr2	miniprot	stop_codon	7369510	7369512	0	-	0	Parent=MP000001;Rank=1
+my %mRNA_hits;
+my %mRNA_hits_rank;
+my %mRNA_match;
+my %mRNA_cds_start;
+my %mRNA_cds_end;
+open(TMPGFF, $tmpgff) || die;
+while (<TMPGFF>) {
+	chomp;
+	if (!/^#/) {
+		my @line = split(/\t/, $_);
+		my $aln_part = $line[2];
+		my $aln_chr = $line[0];
+		my $aln_start = $line[3];
+		my $aln_end = $line[4];
+		my $aln_strand = $line[6];
+		my $attribute = $line[8];
+		if ($aln_part eq "mRNA") {
+			if ($attribute =~ /ID=(.*);Rank=(\d+).*Identity=(\d+\.\d+);Positive=(\d+\.\d+);.*Target=(.+)\s(\d+)\s(\d+)/) {
+				my $hit_id = $1;
+				my $rank = $2;
+				my $identity = $3 * 100;
+				my $target = $5;
+				my $aln_length_aa = $7 - $6 + 1;
+				my $match = $aln_length_aa * $identity / 100;
+				if ($match >= $min_match and $identity >= $min_identity) {
+					$mRNA_hits{$aln_chr}{$aln_start}{$hit_id} = $aln_end;
+					$mRNA_hits_rank{$hit_id} = $rank;
+					$mRNA_match{$hit_id} = $match;
+				}
+			} else {
+				print STDERR "The format of this line is not standard\n";
+				print STDERR "$_\n";
+				last;
+			}
+		} elsif ($aln_part eq "CDS") {
+			# CDS
+			if ($attribute =~ /Parent=(.+);Rank/) {
+				my $cds_parent = $1;
+				if (exists $mRNA_match{$cds_parent}) { # mRNA extracted
+					push(@{$mRNA_cds_start{$cds_parent}}, $aln_start);
+					push(@{$mRNA_cds_end{$cds_parent}}, $aln_end);
+				}
+			}
+		}
+	}
+}
+close TMPGFF;
+
+###############################################
+# Group hits to a group if hit regions overlap
+###############################################
+my @chr = keys %mRNA_hits;
+my $group = 0;
+my %group;
+foreach my $chr (sort {$a cmp $b} @chr) {
+	my %chr_mRNA = %{$mRNA_hits{$chr}};
+	my @mRNA_starts = sort { $a <=> $b } keys %chr_mRNA;
+	my $previous_mRNA_end = 0;
+	for (my $i=0; $i<=$#mRNA_starts; $i++) {
+		my $cur_mRNA_start = $mRNA_starts[$i];
+		my %hitmRNA_end = %{$chr_mRNA{$cur_mRNA_start}};
+		# hit_ids and ends
+		foreach my $cur_mRNA (keys %hitmRNA_end) {
+			if ($cur_mRNA_start >= $previous_mRNA_end) {
+				$group++;
+			}
+			push(@{$group{$group}}, $cur_mRNA);
+			$previous_mRNA_end = $hitmRNA_end{$cur_mRNA};
+		}
+	}
+}
+
+###############################################
+# go through groups and  
+###############################################
+my %passed_mRNA;
+for (my $i=1; $i<=$group; $i++) {
+	my @group_mRNA = @{$group{$i}};
+	if ($#group_mRNA == 0) {
+		$passed_mRNA{$group_mRNA[0]}++;
+	} else {
+		my $subgroup = 0;
+		my %subgroup = (); # initiate subgroup hash
+		my %subgroup_connect = (); # connection between subgroups;
+		for (my $j=0; $j<$#group_mRNA; $j++) {
+			for (my $m=$j; $m<=$#group_mRNA; $m++) {	
+				my $mRNA_A_start = $mRNA_cds_start{$group_mRNA[$j]};
+				my $mRNA_A_end = $mRNA_cds_end{$group_mRNA[$j]};
+				my $mRNA_B_start = $mRNA_cds_start{$group_mRNA[$m]};
+				my $mRNA_B_end = $mRNA_cds_end{$group_mRNA[$m]};
+				# compare two sets of CDS and determine overlaps
+				my $is_mRNA_overlap = &cdsCompare($mRNA_A_start, $mRNA_A_end, $mRNA_B_start, $mRNA_B_end);
+				# assign temporary subgroups
+				if ($is_mRNA_overlap) {
+					if (exists $subgroup{$group_mRNA[$j]} and exists $subgroup{$group_mRNA[$m]}) {
+						if ($subgroup{$group_mRNA[$j]} != $subgroup{$group_mRNA[$m]}) {
+							$subgroup_connect{$subgroup{$group_mRNA[$j]}."_".$subgroup{$group_mRNA[$m]}}++;
+						}
+					} elsif (!exists $subgroup{$group_mRNA[$j]} and exists $subgroup{$group_mRNA[$m]}) {
+						$subgroup{$group_mRNA[$j]} = $subgroup{$group_mRNA[$m]};
+					} elsif (exists $subgroup{$group_mRNA[$j]} and !exists $subgroup{$group_mRNA[$m]}) {
+						$subgroup{$group_mRNA[$m]} = $subgroup{$group_mRNA[$j]};
+					} else { # both not existed; initiate a new subgroup
+						$subgroup++;
+						$subgroup{$group_mRNA[$j]} = $subgroup;
+						$subgroup{$group_mRNA[$m]} = $subgroup;
+					}
+				} else { # not clustered
+					if (!exists $subgroup{$group_mRNA[$j]} and exists $subgroup{$group_mRNA[$m]}) {
+						$subgroup++;
+						$subgroup{$group_mRNA[$j]} = $subgroup;
+					} elsif (exists $subgroup{$group_mRNA[$j]} and !exists $subgroup{$group_mRNA[$m]}) {
+						$subgroup++;
+						$subgroup{$group_mRNA[$m]} = $subgroup;
+					} elsif (!exists $subgroup{$group_mRNA[$j]} and !exists $subgroup{$group_mRNA[$m]}) {
+						$subgroup++;
+						$subgroup{$group_mRNA[$j]} = $subgroup;
+						$subgroup++;
+						$subgroup{$group_mRNA[$m]} = $subgroup;
+					}
+				}
+				# assign final subgroups
+			} # for loop 1 end
+		} # for loop 2 end
+	
+		# update subgroups if connections exist
+		if (%subgroup_connect) { # not empty
+			my $final_subgroup = &findgroup(\%subgroup_connect);
+			my @final_subgroup = @$final_subgroup;
+			my $updated_subgroup = $#final_subgroup + 1;
+			my $updated_cur_subgroup = 0;
+			my %updated_subgroup = %subgroup;
+			foreach my $cur_group (@final_subgroup) {
+				$updated_cur_subgroup++;
+				foreach my $cur_mRNA (keys %subgroup) {
+					if ($subgroup{$cur_mRNA} == $cur_group) {
+						$updated_subgroup{$cur_mRNA} = $updated_cur_subgroup;
+					}
+				}
+			}
+			$subgroup = $updated_subgroup;
+			%subgroup = %updated_subgroup;
+		}
+		
+		# output selected mRNA to a hash	
+		for (my $g=1; $g<=$subgroup; $g++) {
+			my $tmp_best_match = 0;
+			my $select_mRNA;
+			foreach my $cur_mRNA (keys %subgroup) {
+				if ($subgroup{$cur_mRNA} == $g) {
+					my $cur_mRNA_match = $mRNA_match{$cur_mRNA};
+					if ($cur_mRNA_match > $tmp_best_match) {
+						$select_mRNA = $cur_mRNA;
+						$tmp_best_match = $cur_mRNA_match;
+					}
+				}
+			}
+			$passed_mRNA{$select_mRNA}++;
+		}
+	}
+}
+
+###############################################
+# output a new GFF or BED or both
+###############################################
+my $outgff = $prefix.".miniprot.gff";
+my $outbed = $prefix.".miniprot.bed";
+
+if ($format eq "gff" or $format eq "both") {
+	open(OUTGFF, ">", $outgff) || die;
+}
+
+if ($format eq "bed" or $format eq "both") {
+	open(OUTBED, ">", $outbed) || die;
+	print OUTBED "#chr\tstart\tend\tmRNA\trank\tstrand\tprotein\talnmatch\tprotmatch\n";
+}
+
+# start to filter GFF output
+open(TMPGFF, $tmpgff) || die;
+while (<TMPGFF>) {
+	chomp;
+	if (!/^#/) {
+		if (/\b(ID|Parent)=(.*);Rank.*Identity=(\d+\.\d+);.*Target=(\S+)\s/) {
+			my $mRNA_id = $2;
+			my $prot_identity = $3;
+			my $prot_id = $4;
+			if (exists $passed_mRNA{$mRNA_id}) {
+				# GFF output
+				if ($format eq "gff" or $format eq "both") {
+					print OUTGFF "$_\n";
+				}
+				# BED output
+				if ($format eq "bed" or $format eq "both") { #only output mRNA entries
+					my @line = split(/\t/, $_);
+					if ($line[2] eq "mRNA") {
+						print OUTBED "$line[0]\t";
+						my $mRNA_rank = $mRNA_hits_rank{$mRNA_id};
+						my $mRNA_start0 = $line[3] - 1;
+						my $prot_len = $prot_size{$prot_id};
+						my $prot_match = $mRNA_match{$mRNA_id};
+						my $match_prop = $prot_match / $prot_len;
+						$match_prop = sprintf("%.4f", $match_prop); # round to 4 digits
+						print OUTBED "$mRNA_start0\t$line[4]\t$mRNA_id\t";
+						print OUTBED "$mRNA_rank\t$line[6]\t$prot_id\t$prot_identity\t$match_prop\t\n";
+					}
+				}
+			}
+		}
+	} else {
+		if ($format eq "gff" or $format eq "both") {
+			print OUTGFF "$_\n";
+		}
+	}
+}
+close TMPGFF;
+close OUTGFF;
+close OUTBED;
+
+&runreport("step 03: Mapping output filtered");
+
+# cleanup
+`rm $tmpgff`;
+###############################################
+# module 1: check command availability
+###############################################
+sub cmd_check {
+	my $cmd = shift;
+	my $cmdPath=`which $cmd 2>/dev/null`;
+	if (!$cmdPath) {# not founded
+		print STDERR RED, "  $cmd is not found\n", RESET;
+		print STDERR RED, "Exit\n", RESET;
+		exit;
+	}
+}
+
+###############################################
+# module 2: report running result
+###############################################
+# funtion to report running return
+sub runreport {
+	my $injob = shift;
+    my $dateinfo = `date +'o %Y-%m-%d %H:%M:%S'`;
+	print STDERR MAGENTA, "$dateinfo", RESET;
+	print STDERR "  $injob.\n";
+}
+
+###############################################
+# module 3: overlaps between two CDS sets
+# the function of "calculate_overlap" was
+# generated by ChatGPT4o (10/2/2025)
+###############################################
+# cdsCompare($mRNA_A_start, $mRNA_A_end, $mRNA_B_start, $mRNA_B_end);
+sub cdsCompare {
+	my ($A_start, $A_end, $B_start, $B_end) = @_;
+	my @A_start = @$A_start;
+	my @A_end = @$A_end;
+	my @B_start = @$B_start;
+	my @B_end = @$B_end;
+	
+	# Function to calculate overlap between two intervals
+	sub calculate_overlap {
+		my ($start1, $end1, $start2, $end2) = @_;
+    	# Find the max of the start positions and the min of the end positions
+    	my $overlap_start = $start1 > $start2 ? $start1 : $start2;
+    	my $overlap_end = $end1 < $end2 ? $end1 : $end2;
+
+    	# If the overlap start is less than or equal to the overlap end, there is overlap
+    	if ($overlap_start <= $overlap_end) {
+			return $overlap_end - $overlap_start + 1;  # +1 to account for inclusive interval
+		} else {
+			return 0;  # No overlap
+    	}
+	}
+
+	# total lengths of CDS
+	my $A_total_len = 0;
+	my $B_total_len = 0;
+	for (my $i=0; $i<=$#A_start; $i++) {
+		$A_total_len += ($A_end[$i] - $A_start[$i] + 1);
+	}
+	
+	for (my $j=0; $j<=$#B_start; $j++) {
+		$B_total_len += ($B_end[$j] - $B_start[$j] + 1);
+	}
+
+	# Loop through both sets and calculate overlaps
+	my $total_overlap = 0;
+	for (my $i=0; $i<=$#A_start; $i++) {
+    	my ($start1, $end1) = ($A_start[$i], $A_end[$i]);
+		for (my $j=0; $j<=$#B_start; $j++) {
+        	my ($start2, $end2) = ($B_start[$j], $B_end[$j]);
+        	my $overlap_size = calculate_overlap($start1, $end1, $start2, $end2);
+			$total_overlap += $overlap_size;
+		}
+	}
+	
+	# the criterion for the ratio of the CDS overlapping length to CDS total length
+	# If either ratio to two hits is > 50%, the two hits overlap.
+	# >=50% (0.5 was set for a contant - OVERLAP_RATIO_CUTOFF) indicates overlapping 
+	my $is_overlapping = 0;
+	if ($total_overlap/$A_total_len >= OVERLAP_RATIO_CUTOFF or $total_overlap/$B_total_len >= OVERLAP_RATIO_CUTOFF) {
+		$is_overlapping = 1;
+	}
+	return $is_overlapping;
+}
+
+
+###############################################
+# module 4: find final groups
+# the script for this module was largely
+# generated by ChatGPT4o (10/2/2025)
+###############################################
+# Hash to store connections (graph representation)
+my %graph;
+# To keep track of visited nodes
+my %visited;
+sub findgroup {
+	my $connect_hash = shift;
+	my %connect_hash = %{$connect_hash};
+	# Build graphs from connections
+	foreach my $pair (keys %connect_hash) {
+		my ($a, $b) = split("_", $pair);
+		push @{$graph{$a}}, $b;
+		push @{$graph{$b}}, $a;
+	}
+	# Depth-first search (DFS) to collect all connected nodes
+	sub dfs {
+    	my ($node, $group) = @_;
+    	$visited{$node} = 1;
+    	push @$group, $node;
+	    foreach my $neighbor (@{$graph{$node}}) {
+        	dfs($neighbor, $group) unless $visited{$neighbor};
+    	}
+	}
+
+	# Array to hold all groups of connected nodes
+	my @groups;
+
+	# Iterate through all nodes and find connected components
+	foreach my $node (keys %graph) {
+    	unless ($visited{$node}) {
+        	my @group;
+        	dfs($node, \@group);
+			push @groups, \@group;
+    	}
+	}
+
+	# output groups
+	foreach my $egroup (@groups) {
+    	my @egroup = @$egroup;
+		print "Group: " . join(", ", @egroup) . "\n";
+	}
+	return \@groups;
+}

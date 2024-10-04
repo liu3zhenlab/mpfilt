@@ -1,0 +1,22 @@
+#!/bin/bash
+fasta=$1
+effector=/homes/liu3zhen/scripts2/miniprot/mpfilt/data/Mo.effectors.db03.fasta
+out=`basename $fasta | sed 's/.fasta//'`
+
+~/software/miniprot/miniprot \
+	$fasta \
+	$effector \
+	--gff-only \
+	> ${out}.tmp.gff
+
+perl /homes/liu3zhen/scripts2/miniprot/mpfilt/mpfilt \
+	--gff ${out}.tmp.gff \
+	> ${out}.gff
+	
+perl /homes/liu3zhen/scripts2/miniprot/mpfilt/mpfilt \
+	--gff ${out}.tmp.gff \
+	--format bed \
+	| sort -k1,1 -k2,2n > ${out}.bed
+	
+rm ${out}.tmp.gff
+
