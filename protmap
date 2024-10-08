@@ -437,15 +437,15 @@ if (exists $opts{addseq}) {
 	&fas2one($outprot_fasta, $outprot_txt);
 
 	# add protein sequences to BED 
-	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed $outcds_txt > $outbed_cds`;
+	`perl $lookup_cmd --Qkey 4 --Qskip 1 --Tother 2 $outbed $outcds_txt > $outbed_cds`;
 	`head -n 1 $outbed > $outbed_tmp`;
 	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed_cds $outprot_txt >> $outbed_tmp`;
 	`mv $outbed_tmp $outbed`;
 
 	# cleanup
-	`rm $outcds_fasta $outcds_txt`;
-	`rm $outprot_fasta $outprot_txt`;
-	`rm $outbed_cds`;
+	#`rm $outcds_fasta $outcds_txt`;
+	#`rm $outprot_fasta $outprot_txt`;
+	#`rm $outbed_cds`;
 }
 
 ###############################################

@@ -1,0 +1,7 @@
+##gff-version 3
+chrm	miniprot	mRNA	349646	350083	810	-	.	ID=MP000001;Rank=1;Identity=0.9655;Positive=0.9862;Target=PWL2 1 145
+chrm	miniprot	CDS	349646	350083	810	-	0	Parent=MP000001;Rank=1;Identity=0.9655;Target=PWL2 1 145
+chrm	miniprot	mRNA	351757	352104	604	+	.	ID=MP000002;Rank=1;Identity=0.9913;Positive=0.9913;Target=BAS1 1 115
+chrm	miniprot	CDS	351757	352104	604	+	0	Parent=MP000002;Rank=1;Identity=0.9913;Target=BAS1 1 115
+chrm	miniprot	mRNA	1251165	1251461	534	+	.	ID=MP000003;Rank=1;Identity=0.9898;Positive=1.0000;Target=PWT7 1 98
+chrm	miniprot	CDS	1251165	1251461	534	+	0	Parent=MP000003;Rank=1;Identity=0.9898;Target=PWT7 1 98
