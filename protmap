@@ -443,9 +443,9 @@ if (exists $opts{addseq}) {
 	`mv $outbed_tmp $outbed`;
 
 	# cleanup
-	#`rm $outcds_fasta $outcds_txt`;
-	#`rm $outprot_fasta $outprot_txt`;
-	#`rm $outbed_cds`;
+	`rm $outcds_fasta $outcds_txt`;
+	`rm $outprot_fasta $outprot_txt`;
+	`rm $outbed_cds`;
 }
 
 ###############################################
