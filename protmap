@@ -438,7 +438,7 @@ if (exists $opts{addseq}) {
 
 	# add protein sequences to BED 
 	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed $outcds_txt > $outbed_cds`;
-	`head -n 1 $outbe > $outbed_tmp`;
+	`head -n 1 $outbed > $outbed_tmp`;
 	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed_cds $outprot_txt >> $outbed_tmp`;
 	`mv $outbed_tmp $outbed`;
 
