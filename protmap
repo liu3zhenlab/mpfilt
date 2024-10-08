@@ -363,7 +363,7 @@ if ($format eq "gff" or $format eq "both") {
 
 if (($format eq "bed") or ($format eq "both") or (exists $opts{addseq})) {
 	open(OUTBED, ">", $outbed) || die;
-	print OUTBED "#chr\tstart\tend\tmRNA\trank\tstrand\tprotein\talnmatch\tprotmatch";
+	print OUTBED "#chr\tstart\tend\tmRNA\trank\tstrand\tprotein\talnmatch\tprotmatch\tnote";
 	if (exists $opts{addseq}) {
 		print OUTBED "\tCDS\tprotein";
 	}
