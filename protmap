@@ -427,6 +427,7 @@ if (exists $opts{addseq}) {
 	my $outprot_fasta = ${prefix}.".prot.fasta";
 	my $outprot_txt = ${prefix}.".prot.txt";
 	my $outbed_cds = $prefix.".miniprot.cds.bed";
+	my $outbed_tmp = $prefix.".miniprot.cds.prot.bed";
 
 	# output FASTA
 	`$gffread_cmd $outgff -x $outcds_fasta -y $outprot_fasta -g $dna`;
@@ -437,7 +438,9 @@ if (exists $opts{addseq}) {
 
 	# add protein sequences to BED 
 	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed $outcds_txt > $outbed_cds`;
-	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed_cds $outprot_txt > $outbed`;
+	`head -n 1 $outbe > $outbed_tmp`;
+	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed_cds $outprot_txt >> $outbed_tmp`;
+	`mv $outbed_tmp $outbed`;
 
 	# cleanup
 	`rm $outcds_fasta $outcds_txt`;
