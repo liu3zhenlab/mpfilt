@@ -367,7 +367,7 @@ if (($format eq "bed") or ($format eq "both") or (exists $opts{addseq})) {
 	if (exists $opts{addseq}) {
 		print OUTBED "\tCDS\tprotein";
 	}
-	print "\n";
+	print OUTBED "\n";
 }
 
 # start to filter GFF output
