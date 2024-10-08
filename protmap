@@ -21,10 +21,12 @@ use warnings;
 use Getopt::Long;
 use File::Temp;
 use Term::ANSIColor qw(:constants);
-#use FindBin;
+use FindBin;
 #use lib "$FindBin::Bin/lib";
 
-my $version = "0.1.0";
+my $version = "0.1.1";
+# v0.1.1: add "--addseq"
+
 my $prefix = "protmap";
 my $mp_para = "--gff-only";
 my $min_match = 20; # aa
@@ -40,10 +42,12 @@ sub prompt {
     --prot <file>    protein fasta sequences in the FASTA format; required
     --dna <file>     genomic DNA sequences in the FASTA format; required
     --mppara <str>   miniprot mapping parameters ($mp_para);
-	--prefix <str>   prefix for output ($prefix)
+    --prefix <str>   prefix for output ($prefix)
     --match <int>    minimum match in amino acid ($min_match)
     --identity <int> minimum identity in percentage ($min_identity)
     --format <str>   output format: gff, bed, or both ($format)
+    --addseq         add CDS and protein sequences to BED output if specified (default=off)
+                     If specified, BED will be output regardless of the parameter of --format.
     --version        version information
     --help:          help information
 EOF
@@ -58,7 +62,7 @@ my ($query, $db);
 
 &GetOptions(\%opts, "prot=s", "dna=s", "prefix=s", 
 					"mppara=s", "match=i", "identity=i",
-					"format=s", "version", "help");
+					"format=s", "addseq", "version", "help");
 
 if (exists $opts{version}) {
 	print "$version\n";
@@ -107,12 +111,16 @@ if (exists $opts{format}) {
 # check requirments
 ###############################################
 &cmd_check("miniprot");
+&cmd_check("awk");
+# script path:
+my $scriptPath = $FindBin::Bin;
+my $utilsPath = $scriptPath."/utils/";
+my $gffread_cmd = $utilsPath."/gffread";
+my $lookup_cmd = $utilsPath."/lookup.pl";
+&cmd_check("whih $gffread_cmd");
+&cmd_check("whih $lookup_cmd");
 
 &runreport("Requirement checked");
-
-# script path:
-#my $scriptPath = $FindBin::Bin;
-#my $utilsPath = $scriptPath."/utils/";
 
 ###############################################
 # lengths of input proteins 
@@ -177,6 +185,7 @@ if (!$run_error) {
 my %mRNA_hits;
 my %mRNA_hits_rank;
 my %mRNA_match;
+my %mRNA_other_note;
 my %mRNA_cds_start;
 my %mRNA_cds_end;
 open(TMPGFF, $tmpgff) || die;
@@ -191,17 +200,23 @@ while (<TMPGFF>) {
 		my $aln_strand = $line[6];
 		my $attribute = $line[8];
 		if ($aln_part eq "mRNA") {
-			if ($attribute =~ /ID=(.*);Rank=(\d+).*Identity=(\d+\.\d+);Positive=(\d+\.\d+);.*Target=(.+)\s(\d+)\s(\d+)/) {
+			if ($attribute =~ /ID=(.*);Rank=(\d+).*Identity=(\d+\.\d+);Positive=(\d+\.\d+);(.*?);?Target=(.+)\s(\d+)\s(\d+)/) {
 				my $hit_id = $1;
 				my $rank = $2;
 				my $identity = $3 * 100;
-				my $target = $5;
-				my $aln_length_aa = $7 - $6 + 1;
+				my $other_note = $5;
+				#$other_note =~ s/;$//;
+				if ($other_note eq "") {
+					$other_note = ".";
+				}
+				my $target = $6;
+				my $aln_length_aa = $8 - $7 + 1;
 				my $match = $aln_length_aa * $identity / 100;
 				if ($match >= $min_match and $identity >= $min_identity) {
 					$mRNA_hits{$aln_chr}{$aln_start}{$hit_id} = $aln_end;
 					$mRNA_hits_rank{$hit_id} = $rank;
 					$mRNA_match{$hit_id} = $match;
+					$mRNA_other_note{$hit_id} = $other_note;
 				}
 			} else {
 				print STDERR "The format of this line is not standard\n";
@@ -366,7 +381,7 @@ while (<TMPGFF>) {
 					print OUTGFF "$_\n";
 				}
 				# BED output
-				if ($format eq "bed" or $format eq "both") { #only output mRNA entries
+				if (($format eq "bed") or ($format eq "both") or (exists $opts{addseq})) { #only output mRNA entries
 					my @line = split(/\t/, $_);
 					if ($line[2] eq "mRNA") {
 						print OUTBED "$line[0]\t";
@@ -377,7 +392,8 @@ while (<TMPGFF>) {
 						my $match_prop = $prot_match / $prot_len;
 						$match_prop = sprintf("%.4f", $match_prop); # round to 4 digits
 						print OUTBED "$mRNA_start0\t$line[4]\t$mRNA_id\t";
-						print OUTBED "$mRNA_rank\t$line[6]\t$prot_id\t$prot_identity\t$match_prop\t\n";
+						print OUTBED "$mRNA_rank\t$line[6]\t$prot_id\t$prot_identity\t$match_prop\t";
+						print OUTBED "$mRNA_other_note{$mRNA_id}\n";
 					}
 				}
 			}
@@ -396,6 +412,35 @@ close OUTBED;
 
 # cleanup
 `rm $tmpgff`;
+
+###############################################
+# output a BED file with protein sequences
+###############################################
+#my $outbed = $prefix.".miniprot.bed";
+if (exists $opts{addseq}) {
+	my $outcds_fasta = ${prefix}.".cds.fasta";
+	my $outcds_txt = ${prefix}.".cds.txt";
+	my $outprot_fasta = ${prefix}.".prot.fasta";
+	my $outprot_txt = ${prefix}.".prot.txt";
+	my $outbed_cds = $prefix.".miniprot.cds.bed";
+
+	# output FASTA
+	`$gffread_cmd $outgff -x $outcds_fasta -y $outprot_fasta -g $dna`;
+	
+	# fasta to oneline with two columns: mRNA_id and sequence
+	&fas2one($outcds_fasta, $outcds_txt);
+	&fas2one($outprot_fasta, $outprot_txt);
+
+	# add protein sequences to BED 
+	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed $outcds_txt > $outbed_cds`;
+	`perl $lookup_cmd --Qkey 4 --Tother 2 $outbed_cds $outprot_txt > $outbed`;
+
+	# cleanup
+	`rm $outcds_fasta $outcds_txt`;
+	`rm $outprot_fasta $outprot_txt`;
+	`rm $outbed_cds`;
+}
+
 ###############################################
 # module 1: check command availability
 ###############################################
@@ -527,4 +572,30 @@ sub findgroup {
 		print "Group: " . join(", ", @egroup) . "\n";
 	}
 	return \@groups;
+}
+
+###############################################
+# module 5: convert fasta to oneline with two columns
+# the script for this module was largely
+# generated by ChatGPT4o (10/2/2025)
+###############################################
+sub fas2one {
+	my ($in_fas, $out_txt) = @_;
+	my $in_seqname;
+	open(TXT, ">", $out_txt) || die;
+	open(FASTA, "<", $in_fas) || die;
+	while (<FASTA>) {
+		chomp;
+		if (/^>(\S+)/) {
+			if (defined $in_seqname) {
+				print TXT "\n";
+			}
+			$in_seqname = $1;
+			print TXT "$in_seqname\t";
+		} else {
+			print TXT "$_";
+		}
+	}
+	close FASTA;
+	close TXT;
 }
